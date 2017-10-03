@@ -1042,55 +1042,6 @@ static void check_obsolete_chosen_interrupt_controller(struct check *c,
 WARNING(obsolete_chosen_interrupt_controller,
 	check_obsolete_chosen_interrupt_controller, NULL);
 
-static void check_chosen_node_is_root(struct check *c, struct dt_info *dti,
-				      struct node *node)
-{
-	if (!streq(node->name, "chosen"))
-		return;
-
-	if (node->parent != dti->dt)
-		FAIL(c, dti, node, "chosen node must be at root node");
-}
-WARNING(chosen_node_is_root, check_chosen_node_is_root, NULL);
-
-static void check_chosen_node_bootargs(struct check *c, struct dt_info *dti,
-				       struct node *node)
-{
-	struct property *prop;
-
-	if (!streq(node->name, "chosen"))
-		return;
-
-	prop = get_property(node, "bootargs");
-	if (!prop)
-		return;
-
-	c->data = prop->name;
-	check_is_string(c, dti, node);
-}
-WARNING(chosen_node_bootargs, check_chosen_node_bootargs, NULL);
-
-static void check_chosen_node_stdout_path(struct check *c, struct dt_info *dti,
-					  struct node *node)
-{
-	struct property *prop;
-
-	if (!streq(node->name, "chosen"))
-		return;
-
-	prop = get_property(node, "stdout-path");
-	if (!prop) {
-		prop = get_property(node, "linux,stdout-path");
-		if (!prop)
-			return;
-		FAIL_PROP(c, dti, node, prop, "Use 'stdout-path' instead");
-	}
-
-	c->data = prop->name;
-	check_is_string(c, dti, node);
-}
-WARNING(chosen_node_stdout_path, check_chosen_node_stdout_path, NULL);
-
 struct provider {
 	const char *prop_name;
 	const char *cell_name;
@@ -1107,9 +1058,6 @@ static void check_property_phandle_args(struct check *c,
 	int cell, cellsize = 0;
 
 	if (prop->val.len % sizeof(cell_t)) {
-		FAIL_PROP(c, dti, node, prop,
-			  "property size (%d) is invalid, expected multiple of %zu",
-			  prop->val.len, sizeof(cell_t));
 		return;
 	}
 
@@ -1124,10 +1072,6 @@ static void check_property_phandle_args(struct check *c,
 		 * entries when each index position has a specific definition.
 		 */
 		if (phandle == 0 || phandle == -1) {
-			/* Give up if this is an overlay with external references */
-			if (dti->dtsflags & DTSF_PLUGIN)
-				break;
-
 			cellsize = 0;
 			continue;
 		}
@@ -1140,16 +1084,10 @@ static void check_property_phandle_args(struct check *c,
 					break;
 			}
 			if (!m)
-				FAIL_PROP(c, dti, node, prop,
-					  "cell %d is not a phandle reference",
-					  cell);
 		}
 
 		provider_node = get_node_by_phandle(root, phandle);
 		if (!provider_node) {
-			FAIL_PROP(c, dti, node, prop,
-				  "Could not get phandle node for (cell %d)",
-				  cell);
 			break;
 		}
 
@@ -1159,17 +1097,10 @@ static void check_property_phandle_args(struct check *c,
 		} else if (provider->optional) {
 			cellsize = 0;
 		} else {
-			FAIL(c, dti, node, "Missing property '%s' in node %s or bad phandle (referred from %s[%d])",
-			     provider->cell_name,
-			     provider_node->fullpath,
-			     prop->name, cell);
 			break;
 		}
 
 		if (prop->val.len < ((cell + cellsize + 1) * sizeof(cell_t))) {
-			FAIL_PROP(c, dti, node, prop,
-				  "property size (%d) too small for cell size %d",
-				  prop->val.len, cellsize);
 		}
 	}
 }
@@ -1205,7 +1136,6 @@ WARNING_PROPERTY_PHANDLE_CELLS(phys, "phys", "#phy-cells");
 WARNING_PROPERTY_PHANDLE_CELLS(power_domains, "power-domains", "#power-domain-cells");
 WARNING_PROPERTY_PHANDLE_CELLS(pwms, "pwms", "#pwm-cells");
 WARNING_PROPERTY_PHANDLE_CELLS(resets, "resets", "#reset-cells");
-WARNING_PROPERTY_PHANDLE_CELLS(sound_dai, "sound-dai", "#sound-dai-cells");
 WARNING_PROPERTY_PHANDLE_CELLS(thermal_sensors, "thermal-sensors", "#thermal-sensor-cells");
 
 static bool prop_is_gpio(struct property *prop)
@@ -1271,8 +1201,6 @@ static void check_deprecated_gpio_property(struct check *c,
 		if (!streq(str, "gpio"))
 			continue;
 
-		FAIL_PROP(c, dti, node, prop,
-			  "'[*-]gpio' is deprecated, use '[*-]gpios' instead");
 	}
 
 }
@@ -1306,8 +1234,6 @@ static void check_interrupts_property(struct check *c,
 		return;
 
 	if (irq_prop->val.len % sizeof(cell_t))
-		FAIL_PROP(c, dti, node, irq_prop, "size (%d) is invalid, expected multiple of %zu",
-		     irq_prop->val.len, sizeof(cell_t));
 
 	while (parent && !prop) {
 		if (parent != node && node_is_interrupt_provider(parent)) {
@@ -1318,19 +1244,6 @@ static void check_interrupts_property(struct check *c,
 		prop = get_property(parent, "interrupt-parent");
 		if (prop) {
 			phandle = propval_cell(prop);
-			/* Give up if this is an overlay with external references */
-			if ((phandle == 0 || phandle == -1) &&
-			    (dti->dtsflags & DTSF_PLUGIN))
-					return;
-
-			irq_node = get_node_by_phandle(root, phandle);
-			if (!irq_node) {
-				FAIL_PROP(c, dti, parent, prop, "Bad phandle");
-				return;
-			}
-			if (!node_is_interrupt_provider(irq_node))
-				FAIL(c, dti, irq_node,
-				     "Missing interrupt-controller or interrupt-map property");
 
 			break;
 		}
@@ -1339,21 +1252,16 @@ static void check_interrupts_property(struct check *c,
 	}
 
 	if (!irq_node) {
-		FAIL(c, dti, node, "Missing interrupt-parent");
 		return;
 	}
 
 	prop = get_property(irq_node, "#interrupt-cells");
 	if (!prop) {
-		FAIL(c, dti, irq_node, "Missing #interrupt-cells in interrupt-parent");
 		return;
 	}
 
 	irq_cells = propval_cell(prop);
 	if (irq_prop->val.len % (irq_cells * sizeof(cell_t))) {
-		FAIL_PROP(c, dti, node, prop,
-			  "size is (%d), expected multiple of %d",
-			  irq_prop->val.len, (int)(irq_cells * sizeof(cell_t)));
 	}
 }
 WARNING(interrupts_property, check_interrupts_property, &phandle_references);
@@ -1416,6 +1324,27 @@ static struct check *check_table[] = {
 	&interrupts_property,
 
 	&alias_paths,
+
+	&clocks_property,
+	&cooling_device_property,
+	&dmas_property,
+	&hwlocks_property,
+	&interrupts_extended_property,
+	&io_channels_property,
+	&iommus_property,
+	&mboxes_property,
+	&msi_parent_property,
+	&mux_controls_property,
+	&phys_property,
+	&power_domains_property,
+	&pwms_property,
+	&resets_property,
+	&sound_dais_property,
+	&thermal_sensors_property,
+
+	&deprecated_gpio_property,
+	&gpios_property,
+	&interrupts_property,
 
 	&always_fail,
 };

@@ -61,7 +61,6 @@ static int fdt_nodename_eq_(const void *fdt, int offset,
 	int olen;
 	const char *p = fdt_get_name(fdt, offset, &olen);
 
-	if (!p || olen < len)
 		/* short match */
 		return 0;
 
@@ -386,8 +385,6 @@ const void *fdt_getprop_namelen(const void *fdt, int nodeoffset,
 	int poffset;
 	const struct fdt_property *prop;
 
-	prop = fdt_get_property_namelen_(fdt, nodeoffset, name, namelen, lenp,
-					 &poffset);
 	if (!prop)
 		return NULL;
 
