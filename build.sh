@@ -1,75 +1,140 @@
 #!/bin/bash
-#
-# Compile script for Arise kernel
-# Copyright (C) 2020-2021 Adithya R.
+# =====================================================================
+# 💫 Build Script — HYBRID MODE
+# 🔧 Created by Michikoextv2
+# =====================================================================
 
-SECONDS=0 # builtin bash timer
-ZIPNAME="Shinigami-surya-$(date '+%Y%m%d-%H%M').zip"
-TC_DIR="$(pwd)/tc/clang-498229"
-AK3_DIR="$(pwd)/android/AnyKernel3"
-DEFCONFIG="surya_defconfig"
+# Set date kernel
+DATE="$(TZ=Asia/Jakarta date +%Y%m%d%H%M)"
 
-if test -z "$(git rev-parse --show-cdup 2>/dev/null)" &&
-   head=$(git rev-parse --verify HEAD 2>/dev/null); then
-	ZIPNAME="${ZIPNAME::-4}-$(echo $head | cut -c1-8).zip"
+# 🎨 Warna
+RED='\033[1;31m'; GREEN='\033[1;32m'; YELLOW='\033[1;33m'
+BLUE='\033[1;34m'; CYAN='\033[1;36m'; MAGENTA='\033[1;35m'
+RESET='\033[0m'; BOLD='\033[1m'
+
+# 📂 Variabel utama
+KERNEL_DIR=$(pwd)
+OUT_DIR="$KERNEL_DIR/out"
+CLANG_DIR="$KERNEL_DIR/../neutron-clang"
+ARCH="arm64"
+BUILD_LOG="$KERNEL_DIR/build.log"
+DATE=$(date +"%Y-%m-%d_%H-%M")
+
+# 🧠 Info sistem
+CPU_CORES=$(nproc)
+CLANG_VERSION=$($CLANG_DIR/bin/clang --version | head -n 1)
+HOST_OS=$(uname -o)
+HOST_KERNEL=$(uname -r)
+HOST_CPU=$(grep -m1 "model name" /proc/cpuinfo | cut -d: -f2 | sed 's/^ //')
+
+clear
+echo -e "${MAGENTA}${BOLD}=============================================================="
+echo -e " 💫 MICHIKO Build Script — FINAL HYBRID MODE"
+echo -e "==============================================================${RESET}"
+echo -e "${CYAN}👤 Dibuat oleh:${RESET} ${GREEN}Michikoextv2${RESET}"
+echo -e "${YELLOW}🧰 Toolchain:${RESET} ${GREEN}${CLANG_VERSION}${RESET}"
+echo -e "${YELLOW}🧠 CPU:${RESET} ${GREEN}${HOST_CPU}${RESET}"
+echo -e "${YELLOW}💻 Host:${RESET} ${GREEN}${HOST_OS} (${HOST_KERNEL})${RESET}"
+echo -e "${YELLOW}📄 Build Log:${RESET} ${GREEN}${BUILD_LOG}${RESET}"
+echo -e "${MAGENTA}==============================================================${RESET}\n"
+
+# 🔍 Cek toolchain
+if [ ! -f "$CLANG_DIR/bin/clang" ]; then
+    echo -e "${RED}❌ Clang tidak ditemukan di: $CLANG_DIR${RESET}"
+    exit 1
 fi
 
-export PATH="$TC_DIR/bin:$PATH"
-
-if ! [ -d "$TC_DIR" ]; then
-	echo "AOSP clang not found! Cloning to $TC_DIR..."
-	if ! git clone --depth=1 -b 17 https://gitlab.com/ThankYouMario/android_prebuilts_clang-standalone "$TC_DIR"; then
-		echo "Cloning failed! Aborting..."
-		exit 1
-	fi
+if [ ! -f "$CLANG_DIR/bin/ld.lld" ]; then
+    echo -e "${YELLOW}⚠️ ld.lld tidak ditemukan, menggunakan system lld${RESET}"
+    sudo apt install -y lld &>/dev/null
 fi
 
-if [[ $1 = "-r" || $1 = "--regen" ]]; then
-	make O=out ARCH=arm64 $DEFCONFIG savedefconfig
-	cp out/defconfig arch/arm64/configs/$DEFCONFIG
-	echo -e "\nSuccessfully regenerated defconfig at $DEFCONFIG"
-	exit
-fi
+export PATH="$CLANG_DIR/bin:$PATH"
 
-if [[ $1 = "-rf" || $1 = "--regen-full" ]]; then
-	make O=out ARCH=arm64 $DEFCONFIG
-	cp out/.config arch/arm64/configs/$DEFCONFIG
-	echo -e "\nSuccessfully regenerated full defconfig at $DEFCONFIG"
-	exit
-fi
+# Set environment variables
+	export USE_CCACHE=1
+	export KBUILD_BUILD_HOST=xyz
+	export KBUILD_BUILD_USER=standalone
+	
+# 🔍 Auto detect defconfig
+CONFIG_PATH="$KERNEL_DIR/arch/arm64/configs"
+DEFCONFIGS=($(ls "$CONFIG_PATH" | grep -E "defconfig$"))
 
-if [[ $1 = "-c" || $1 = "--clean" ]]; then
-	rm -rf out
-fi
-
-mkdir -p out
-make O=out ARCH=arm64 $DEFCONFIG
-
-echo -e "\nStarting compilation...\n"
-make -j$(nproc --all) O=out ARCH=arm64 CC=clang LD=ld.lld AS=llvm-as AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- LLVM=1 LLVM_IAS=1 Image.gz dtb.img dtbo.img 2> >(tee log.txt >&2) || exit $?
-
-kernel="out/arch/arm64/boot/Image.gz"
-dtb="out/arch/arm64/boot/dtb.img"
-dtbo="out/arch/arm64/boot/dtbo.img"
-
-if [ -f "$kernel" ] && [ -f "$dtb" ] && [ -f "$dtbo" ]; then
-	echo -e "\nKernel compiled succesfully! Zipping up...\n"
-	if [ -d "$AK3_DIR" ]; then
-		cp -r $AK3_DIR AnyKernel3
-	elif ! git clone -q https://github.com/surya-aosp/AnyKernel3 -b shinigami; then
-		echo -e "\nAnyKernel3 repo not found locally and couldn't clone from GitHub! Aborting..."
-		exit 1
-	fi
-	cp $kernel $dtb $dtbo AnyKernel3
-	rm -rf out/arch/arm64/boot
-	cd AnyKernel3
-	git checkout shinigami &> /dev/null
-	zip -r9 "../$ZIPNAME" * -x .git README.md *placeholder
-	cd ..
-	rm -rf AnyKernel3
-	echo -e "\nCompleted in $((SECONDS / 60)) minute(s) and $((SECONDS % 60)) second(s) !"
-	echo "Zip: $ZIPNAME"
+if [ ${#DEFCONFIGS[@]} -eq 0 ]; then
+    echo -e "${RED}❌ Tidak ada defconfig ditemukan di $CONFIG_PATH${RESET}"
+    exit 1
+elif [ ${#DEFCONFIGS[@]} -eq 1 ]; then
+    DEFCONFIG=${DEFCONFIGS[0]}
+    echo -e "${GREEN}✅ Ditemukan satu defconfig: ${DEFCONFIG}${RESET}"
 else
-	echo -e "\nCompilation failed!"
-	exit 1
+    echo -e "${YELLOW}Pilih defconfig yang ingin digunakan:${RESET}"
+    select DEFCONFIG in "${DEFCONFIGS[@]}"; do
+        if [[ -n "$DEFCONFIG" ]]; then
+            echo -e "${GREEN}✅ Menggunakan defconfig: $DEFCONFIG${RESET}"
+            break
+        else
+            echo -e "${RED}❌ Pilihan tidak valid, coba lagi.${RESET}"
+        fi
+    done
 fi
+
+# 🧹 Bersihkan build lama
+echo -e "\n${CYAN}🧹 Membersihkan build lama...${RESET}"
+make clean &>/dev/null
+rm -rf "$OUT_DIR"
+mkdir -p "$OUT_DIR"
+rm -f "$BUILD_LOG"
+
+# ⚙️ Generate defconfig
+echo -e "${YELLOW}⚙️ Menghasilkan defconfig (${DEFCONFIG})...${RESET}"
+make O="$OUT_DIR" ARCH="$ARCH" "$DEFCONFIG" | tee -a "$BUILD_LOG"
+if [ $? -ne 0 ]; then
+    echo -e "${RED}❌ Gagal generate defconfig. Pastikan file '${DEFCONFIG}' ada.${RESET}"
+    exit 1
+fi
+
+# 🧭 Menuconfig opsional
+read -p "$(echo -e ${MAGENTA}'🧭 Ingin buka menuconfig sebelum build? (y/n): '${RESET})" menu
+[[ "$menu" =~ ^[Yy]$ ]] && make O="$OUT_DIR" ARCH="$ARCH" menuconfig | tee -a "$BUILD_LOG"
+
+# ⏱️ Timer mulai
+BUILD_START=$(date +%s)
+
+# 🚀 Build kernel
+echo -e "\n${CYAN}🚀 Memulai proses build kernel...${RESET}"
+make -j$(nproc --all) O="$OUT_DIR" ARCH="$ARCH" \
+	CC=clang \
+    	LD=ld.lld \
+    	AR=llvm-ar \
+    	NM=llvm-nm \
+    	STRIP=llvm-strip \
+    	OBJCOPY=llvm-objcopy \
+    	OBJDUMP=llvm-objdump \
+    	READELF=llvm-readelf \
+    	LLVM=1 LLVM_IAS=1 \
+    	CROSS_COMPILE=aarch64-linux-gnu- \
+        CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
+    	2>&1 | tee -a "$BUILD_LOG"
+
+# 🕒 Timer selesai
+BUILD_END=$(date +%s)
+BUILD_TIME=$((BUILD_END - BUILD_START))
+
+# ✅ Hasil build
+IMAGE="$OUT_DIR/arch/arm64/boot/Image.gz"
+
+echo -e "\n${CYAN}==============================================================${RESET}"
+if [ -f "$IMAGE" ]; then
+    echo -e "${GREEN}✅ Build kernel berhasil!${RESET}"
+    echo -e "${YELLOW}📦 Output:${RESET} ${BLUE}${IMAGE}${RESET}"
+    # Rename hasil build otomatis
+    FINAL_IMAGE="$KERNEL_DIR/Millenia-Kernel-${DATE}.img"
+    cp "$IMAGE" "$FINAL_IMAGE"
+    echo -e "${GREEN}💾 Disalin ke:${RESET} ${FINAL_IMAGE}"
+
+else
+    echo -e "${RED}❌ Build kernel gagal. Periksa ${BUILD_LOG}.${RESET}"
+fi
+echo -e "${YELLOW}⏱️ Durasi Build:${RESET} ${GREEN}${BUILD_TIME}s${RESET}"
+echo -e "${CYAN}==============================================================${RESET}"
+echo -e "${MAGENTA}${BOLD}🎉 Congratulations by Michikoextv2 — Build Selesai!${RESET}\n"
