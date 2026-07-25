@@ -216,6 +216,7 @@ struct node *merge_nodes(struct node *old_node, struct node *new_node)
 	return old_node;
 }
 
+struct node * add_orphan_node(struct node *dt, struct node *new_node, char *ref)
 {
 	static unsigned int next_orphan_fragment = 0;
 	struct node *node;
@@ -235,6 +236,7 @@ struct node *merge_nodes(struct node *old_node, struct node *new_node)
 	name_node(node, name);
 
 	add_child(dt, node);
+	return dt;
 }
 
 struct node *chain_node(struct node *first, struct node *list)
@@ -506,6 +508,7 @@ struct node *get_node_by_path(struct node *tree, const char *path)
 
 	for_each_child(tree, child) {
 		if (p && (strlen(child->name) == p-path) &&
+		    strprefixeq(path, p - path, child->name))
 			return get_node_by_path(child, p+1);
 		else if (!p && streq(path, child->name))
 			return child;
